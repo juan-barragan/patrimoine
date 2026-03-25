@@ -376,7 +376,9 @@ const TYPE_LABEL  = { 0:'Pont tablier', 1:'Pont voûte', 2:'Mur',
                       3:'Buse', 4:'Cadre/portique', '-1':'Inconnu' };
 
 // mini-JSON column indices
-const I = { ID:0, LAT:1, LON:2, ETAT:3, TYPE:4, SURF:5, MAINT:6, REMED:7, RISK:8, COMMUNE:9, DEPT:10, PERIODE:11 };
+const I = { ID:0, LAT:1, LON:2, ETAT:3, TYPE:4, SURF:5, MAINT:6, REMED:7, RISK:8,
+             COMMUNE:9, DEPT:10, PERIODE:11, NOM:12, REMED_OPT:13, REMED_PES:14,
+             TONNAGE_R:15, TONNAGE_L:16, AQUATIC:17, REPAIRS:18 };
 
 /* ── State ──────────────────────────────────────────────────────────────────*/
 let allRows   = [];                    // raw mini-JSON rows
@@ -392,9 +394,6 @@ let   activeCommune = '';     // empty = all communes
 let   activeDept    = '';     // empty = all départements
 let   activePeriode = '';     // empty = all périodes
 
-// GeoJSON lazy cache
-let geoCache        = null;            // Map<id, properties> once loaded
-let geoCachePromise = null;            // in-flight fetch promise
 
 /* ── Loading helpers ────────────────────────────────────────────────────────*/
 function progress(pct, msg) {
@@ -407,27 +406,6 @@ function hideLoader() {
   setTimeout(() => el.remove(), 550);
 }
 
-/* ── GeoJSON lazy loader ────────────────────────────────────────────────────*/
-async function fetchDetails(id) {
-  // Already cached → return immediately
-  if (geoCache) return geoCache.get(id) ?? null;
-
-  // Start fetch once; reuse the same promise for parallel clicks
-  if (!geoCachePromise) {
-    geoCachePromise = (async () => {
-      const resp = await fetch('./map_data.geojson');
-      if (!resp.ok) throw new Error('GeoJSON HTTP ' + resp.status);
-      const gj  = await resp.json();
-      const m   = new Map();
-      for (const f of gj.features) m.set(f.properties.id, f.properties);
-      geoCache = m;
-      return m;
-    })();
-  }
-
-  const m = await geoCachePromise;
-  return m.get(id) ?? null;
-}
 
 /* ── Row predicate & stats ──────────────────────────────────────────────────*/
 function rowPass(r) {
@@ -498,62 +476,53 @@ function fmtK(eur) {
   return (eur / 1000).toFixed(1).replace('.', ',') + '\u202fk€';
 }
 
-function renderPopup(miniProps, details) {
-  const etat   = miniProps.etat_int;
-  const tInt   = miniProps.type_int;
+function renderPopup(p) {
+  const etat   = p.etat_int;
+  const tInt   = p.type_int;
   const color  = ETAT_COLOR[etat]  ?? '#888';
   const tLabel = TYPE_LABEL[tInt]  ?? 'Inconnu';
   const eLabel = ETAT_LABEL[etat]  ?? '—';
 
-  const loading = (txt) =>
-    details ? txt : `<span class="popup-loading">${txt}</span>`;
+  const name    = p.nom_usuel || 'Sans nom';
+  const commune = p.commune   || '—';
+  const dept    = p.departement || '—';
+  const periode = p.periode   || '—';
 
-  const name    = details ? (details.nom_usuel    || 'Sans nom') : null;
-  const commune = details ? (details.commune      || '—')        : null;
-  const dept    = details ? (details.departement  || '—')        : null;
-  const periode = details ? (details.periode      || '—')        : null;
-
-  const remOpt  = details ? details.remediation_optimistic  : null;
-  const remPes  = details ? details.remediation_pessimistic : null;
-  const fourch  = details
-    ? `<span class="muted">${fmtK(remOpt)}\u2013${fmtK(remPes)}</span>`
-    : '<span class="popup-loading">fourchette…</span>';
+  const fourch = `<span class="muted">${fmtK(p.remediation_optimistic)}\u2013${fmtK(p.remediation_pessimistic)}</span>`;
 
   let flagsHTML = '';
-  if (details) {
-    const flags = [];
-    if (details.tonnage_restriction === 'Oui' && details.tonnage_limit != null)
-      flags.push(`⚠️ Tonnage limité\u00a0: ${details.tonnage_limit}\u202ft`);
-    if (details.aquatic === 'Oui')
-      flags.push('💧 Exposition aquatique');
-    if (details.prior_repairs === 'Oui')
-      flags.push('🔨 Renforcements antérieurs');
-    if (flags.length) {
-      flagsHTML = `<div class="popup-flags">
-        ${flags.map(f => `<div class="popup-flag">${f}</div>`).join('')}
-      </div>`;
-    }
+  const flags = [];
+  if (p.tonnage_restriction === 'Oui' && p.tonnage_limit)
+    flags.push(`⚠️ Tonnage limité\u00a0: ${p.tonnage_limit}\u202ft`);
+  if (p.aquatic === 'Oui')
+    flags.push('💧 Exposition aquatique');
+  if (p.prior_repairs === 'Oui')
+    flags.push('🔨 Renforcements antérieurs');
+  if (flags.length) {
+    flagsHTML = `<div class="popup-flags">
+      ${flags.map(f => `<div class="popup-flag">${f}</div>`).join('')}
+    </div>`;
   }
 
   return `
 <div class="popup">
   <div class="popup-header" style="border-left:4px solid ${color}">
-    <strong>${loading(name ?? 'Chargement…')}</strong>
+    <strong>${name}</strong>
     <span class="type-badge">${tLabel}</span>
   </div>
   <div class="popup-meta">
-    <div>📍 ${loading(commune ? `${commune}\u202f·\u202f${dept}` : 'Chargement…')}</div>
-    <div>📅 ${loading(periode ?? 'Chargement…')}</div>
+    <div>📍 ${commune}\u202f·\u202f${dept}</div>
+    <div>📅 ${periode}</div>
   </div>
   <div class="popup-body">
     <div class="popup-section">
       <span class="etat-badge" style="background:${color}">${eLabel}</span>
-      <span class="popup-surface">Surface\u00a0: ${(miniProps.surface ?? 0).toFixed(0)}\u202fm²</span>
+      <span class="popup-surface">Surface\u00a0: ${(p.surface ?? 0).toFixed(0)}\u202fm²</span>
     </div>
     <div class="popup-costs">
-      <div>💰 Maintenance\u00a0: <strong>${fmtK(miniProps.maint_min)}/an</strong>
+      <div>💰 Maintenance\u00a0: <strong>${fmtK(p.maint_min)}/an</strong>
            <span class="muted">(minimal)</span></div>
-      <div>🔧 Remise à niveau\u00a0: <strong>${fmtK(miniProps.remediation)}</strong>
+      <div>🔧 Remise à niveau\u00a0: <strong>${fmtK(p.remediation)}</strong>
            ${fourch}</div>
     </div>
     ${flagsHTML}
@@ -562,30 +531,13 @@ function renderPopup(miniProps, details) {
 }
 
 /* ── Click handler ──────────────────────────────────────────────────────────*/
-async function handleClick(e) {
-  const feat  = e.features[0];
-  const mp    = feat.properties;    // mini props from MapLibre layer
-  const id    = mp.id;
-  openId      = id;
-
-  // Open popup immediately with mini data
+function handleClick(e) {
+  const mp = e.features[0].properties;
   if (!popup) popup = new maplibregl.Popup({ maxWidth: '320px', offset: 8 });
   popup
     .setLngLat(e.lngLat)
-    .setHTML(renderPopup(mp, null))
+    .setHTML(renderPopup(mp))
     .addTo(map);
-
-  popup.once('close', () => { openId = null; });
-
-  try {
-    const details = await fetchDetails(id);
-    // Only update if same popup is still open
-    if (openId === id && popup.isOpen()) {
-      popup.setHTML(renderPopup(mp, details));
-    }
-  } catch (err) {
-    console.warn('fetchDetails failed:', err);
-  }
 }
 
 /* ── Wire controls ──────────────────────────────────────────────────────────*/
@@ -710,6 +662,13 @@ function wireControls() {
         commune:    r[I.COMMUNE],
         departement:r[I.DEPT],
         periode:    r[I.PERIODE],
+        nom_usuel:  r[I.NOM],
+        remediation_optimistic:  r[I.REMED_OPT],
+        remediation_pessimistic: r[I.REMED_PES],
+        tonnage_restriction: r[I.TONNAGE_R],
+        tonnage_limit:       r[I.TONNAGE_L],
+        aquatic:     r[I.AQUATIC],
+        prior_repairs: r[I.REPAIRS],
       },
     }));
 
