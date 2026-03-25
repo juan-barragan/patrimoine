@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ouvrages d'art communaux — France</title>
+<link href="https://unpkg.com/maplibre-gl@3/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@3/dist/maplibre-gl.js"></script>
+<style>
+/* ── Reset & base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+               Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  background: #111;
+}
+
+/* ── Map fills the viewport ───────────────────────────────────────────────── */
+#map { position: absolute; inset: 0; }
+
+/* ── Loading overlay ──────────────────────────────────────────────────────── */
+#loader {
+  position: absolute; inset: 0; z-index: 900;
+  background: #1b2631;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px; color: #ecf0f1;
+  transition: opacity .5s ease;
+}
+#loader.fade { opacity: 0; pointer-events: none; }
+#loader h2 { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+#loader-track {
+  width: 220px; height: 5px;
+  background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden;
+}
+#loader-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #27ae60, #2980b9);
+  transition: width .25s ease;
+}
+#loader-msg { font-size: 11.5px; color: #7f8c8d; }
+
+/* ── Controls panel ───────────────────────────────────────────────────────── */
+#panel {
+  position: absolute; top: 10px; right: 10px;
+  width: 260px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 3px 14px rgba(0,0,0,.22);
+  z-index: 10;
+  overflow: visible;
+}
+.panel-title {
+  border-radius: 10px 10px 0 0;
+}
+
+.panel-title {
+  padding: 11px 14px 9px;
+  background: #1b2631;
+  color: #ecf0f1;
+}
+.panel-title strong {
+  display: block;
+  font-size: 13px; font-weight: 700; line-height: 1.3;
+}
+.panel-title small {
+  display: block;
+  font-size: 10.5px; color: #95a5a6; margin-top: 2px;
+}
+
+.panel-body { padding: 12px 14px; }
+
+.filter-group { margin-bottom: 13px; }
+.filter-label {
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .6px;
+  color: #7f8c8d; margin-bottom: 7px;
+}
+
+/* 2-col grid for état & type checkboxes */
+.cb-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px;
+}
+
+.cb-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: 5px;
+  cursor: pointer; transition: background .1s;
+  user-select: none;
+}
+.cb-item:hover { background: #f4f6f7; }
+.cb-item input[type=checkbox] {
+  cursor: pointer; width: 13px; height: 13px;
+  accent-color: #2c3e50; flex-shrink: 0;
+}
+.cb-dot {
+  width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0;
+}
+.cb-text { font-size: 12px; line-height: 1.2; }
+
+/* Risk slider */
+.slider-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+}
+#risk-slider {
+  flex: 1; -webkit-appearance: none; appearance: none;
+  height: 4px; background: #ddd; border-radius: 2px; cursor: pointer;
+}
+#risk-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #2c3e50; cursor: pointer;
+}
+#risk-val {
+  font-size: 12px; font-weight: 700;
+  color: #2c3e50; min-width: 16px; text-align: right;
+}
+
+/* Counter */
+#counter {
+  margin-top: 11px; padding: 7px 10px;
+  background: #f0f3f4; border-radius: 6px;
+  font-size: 12px; font-weight: 600;
+  color: #2c3e50; text-align: center;
+}
+
+/* ── Legend ───────────────────────────────────────────────────────────────── */
+#legend {
+  position: absolute; bottom: 44px; left: 10px;
+  background: #fff; border-radius: 9px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.18);
+  padding: 10px 13px; z-index: 10; min-width: 200px;
+}
+.legend-title {
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .5px;
+  color: #7f8c8d; margin-bottom: 8px;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+}
+.legend-item:last-child { margin-bottom: 0; }
+.legend-dot {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+}
+.legend-name { flex: 1; font-size: 12px; }
+.legend-n {
+  font-size: 11px; color: #95a5a6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Bottom stats bar ─────────────────────────────────────────────────────── */
+#bottom-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 36px;
+  background: rgba(27,38,49,.9);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 0;
+  z-index: 10; color: #ecf0f1;
+  font-size: 13px;
+}
+.stat {
+  padding: 0 16px; display: flex; align-items: center; gap: 5px;
+  border-right: 1px solid rgba(255,255,255,.12);
+}
+.stat:first-child { padding-left: 0; }
+.stat:last-child  { border-right: none; }
+.stat-lbl { color: #7f8c8d; font-size: 12px; }
+.stat-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── Popup overrides ──────────────────────────────────────────────────────── */
+.maplibregl-popup-content {
+  padding: 0 !important;
+  border-radius: 9px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,.22) !important;
+  max-width: 300px !important;
+  min-width: 230px;
+}
+.maplibregl-popup-close-button {
+  font-size: 18px !important;
+  color: #7f8c8d !important;
+  right: 6px !important; top: 4px !important;
+  line-height: 1 !important;
+}
+
+.popup { font-size: 12.5px; color: #2c3e50; }
+
+.popup-header {
+  padding: 10px 13px 9px;
+  border-left: 4px solid #888; /* overridden inline */
+  background: #fafafa;
+  display: flex; align-items: flex-start;
+  justify-content: space-between; gap: 8px;
+}
+.popup-header strong {
+  font-size: 13px; line-height: 1.3;
+  flex: 1;
+}
+.type-badge {
+  font-size: 10px; font-weight: 600;
+  background: #2c3e50; color: #fff;
+  padding: 2px 6px; border-radius: 10px;
+  white-space: nowrap; flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.popup-meta {
+  padding: 6px 13px 0;
+  color: #7f8c8d; font-size: 12px; line-height: 1.6;
+}
+
+.popup-body { padding: 8px 13px 11px; }
+
+.popup-section {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.etat-badge {
+  font-size: 11px; font-weight: 600; color: #fff;
+  padding: 2px 9px; border-radius: 10px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.popup-surface { font-size: 12px; color: #555; }
+
+.popup-costs { margin-bottom: 7px; }
+.popup-costs > div { margin-bottom: 4px; line-height: 1.4; }
+.popup-costs > div:last-child { margin-bottom: 0; }
+.muted { color: #95a5a6; font-size: 11px; }
+
+.popup-flags {
+  border-top: 1px solid #eee; padding-top: 7px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.popup-flag { font-size: 12px; color: #c0392b; }
+.popup-loading { color: #aaa; font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loader">
+  <h2>🗺 Chargement de la carte…</h2>
+  <div id="loader-track"><div id="loader-fill"></div></div>
+  <div id="loader-msg">Initialisation…</div>
+</div>
+
+<div id="map"></div>
+
+<!-- Controls panel -->
+<div id="panel">
+  <div class="panel-title">
+    <strong>Ouvrages d'art communaux — France</strong>
+    <small>Programme National Ponts · Cerema 2022</small>
+  </div>
+  <div class="panel-body">
+
+    <div class="filter-group">
+      <div class="filter-label">État</div>
+      <div class="cb-grid">
+        <label class="cb-item">
+          <input type="checkbox" data-group="etat" data-val="0" checked>
+          <span class="cb-dot" style="background:#2ecc71"></span>
+          <span class="cb-text">Bon état</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="etat" data-val="1" checked>
+          <span class="cb-dot" style="background:#f1c40f"></span>
+          <span class="cb-text">Défaut altérer</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="etat" data-val="2" checked>
+          <span class="cb-dot" style="background:#e67e22"></span>
+          <span class="cb-text">Significatif</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="etat" data-val="3" checked>
+          <span class="cb-dot" style="background:#e74c3c"></span>
+          <span class="cb-text">Majeur</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-label">Type</div>
+      <div class="cb-grid">
+        <label class="cb-item">
+          <input type="checkbox" data-group="type" data-val="0" checked>
+          <span class="cb-text">Pont tablier</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="type" data-val="1" checked>
+          <span class="cb-text">Pont voûte</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="type" data-val="2" checked>
+          <span class="cb-text">Mur</span>
+        </label>
+        <label class="cb-item">
+          <input type="checkbox" data-group="type" data-val="34" checked>
+          <span class="cb-text">Buse / Cadre</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-label">Département</div>
+      <select id="dept-select"
+              style="width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;background:#fff;">
+        <option value="">Tous les départements</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-label">Commune</div>
+      <input type="text" id="commune-search" placeholder="Rechercher une commune…"
+             list="commune-list" autocomplete="off"
+             style="width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;">
+      <datalist id="commune-list"></datalist>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-label">Période de construction</div>
+      <select id="periode-select"
+              style="width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;background:#fff;">
+        <option value="">Toutes les périodes</option>
+      </select>
+    </div>
+
+    <div class="filter-group" style="margin-bottom:0">
+      <div class="filter-label">Score risque ≥ N</div>
+      <div class="slider-row">
+        <input type="range" id="risk-slider" min="0" max="4" step="1" value="0">
+        <span id="risk-val">0</span>
+      </div>
+    </div>
+
+    <div id="counter">–</div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="legend-title">État des ouvrages</div>
+  <div id="legend-body"></div>
+</div>
+
+<!-- Bottom stats bar -->
+<div id="bottom-bar">
+  <div class="stat">
+    <span class="stat-lbl">Ouvrages</span>
+    <span class="stat-val" id="s-count">–</span>
+  </div>
+  <div class="stat">
+    <span class="stat-lbl">Maintenance</span>
+    <span class="stat-val" id="s-maint">– M€/an</span>
+  </div>
+  <div class="stat">
+    <span class="stat-lbl">Remise à niveau</span>
+    <span class="stat-val" id="s-remed">– M€</span>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ── Constants ──────────────────────────────────────────────────────────────*/
+const ETAT_COLOR  = { 0:'#2ecc71', 1:'#f1c40f', 2:'#e67e22', 3:'#e74c3c' };
+const ETAT_LABEL  = { 0:'Bon état', 1:'Défaut pouvant altérer',
+                      2:'Défaut significatif', 3:'Défaut majeur' };
+const TYPE_LABEL  = { 0:'Pont tablier', 1:'Pont voûte', 2:'Mur',
+                      3:'Buse', 4:'Cadre/portique', '-1':'Inconnu' };
+
+// mini-JSON column indices
+const I = { ID:0, LAT:1, LON:2, ETAT:3, TYPE:4, SURF:5, MAINT:6, REMED:7, RISK:8, COMMUNE:9, DEPT:10, PERIODE:11 };
+
+/* ── State ──────────────────────────────────────────────────────────────────*/
+let allRows   = [];                    // raw mini-JSON rows
+let map       = null;
+let popup     = null;
+let openId    = null;                  // id of currently open popup
+
+// active filter sets  (type 34 = buse+cadre combined checkbox)
+const activeEtats = new Set([0, 1, 2, 3]);
+const activeTypes = new Set([0, 1, 2, 3, 4, -1]);   // -1 = inconnu (24 rows)
+let   minRisk     = 0;
+let   activeCommune = '';     // empty = all communes
+let   activeDept    = '';     // empty = all départements
+let   activePeriode = '';     // empty = all périodes
+
+// GeoJSON lazy cache
+let geoCache        = null;            // Map<id, properties> once loaded
+let geoCachePromise = null;            // in-flight fetch promise
+
+/* ── Loading helpers ────────────────────────────────────────────────────────*/
+function progress(pct, msg) {
+  document.getElementById('loader-fill').style.width = pct + '%';
+  document.getElementById('loader-msg').textContent  = msg;
+}
+function hideLoader() {
+  const el = document.getElementById('loader');
+  el.classList.add('fade');
+  setTimeout(() => el.remove(), 550);
+}
+
+/* ── GeoJSON lazy loader ────────────────────────────────────────────────────*/
+async function fetchDetails(id) {
+  // Already cached → return immediately
+  if (geoCache) return geoCache.get(id) ?? null;
+
+  // Start fetch once; reuse the same promise for parallel clicks
+  if (!geoCachePromise) {
+    geoCachePromise = (async () => {
+      const resp = await fetch('./map_data.geojson');
+      if (!resp.ok) throw new Error('GeoJSON HTTP ' + resp.status);
+      const gj  = await resp.json();
+      const m   = new Map();
+      for (const f of gj.features) m.set(f.properties.id, f.properties);
+      geoCache = m;
+      return m;
+    })();
+  }
+
+  const m = await geoCachePromise;
+  return m.get(id) ?? null;
+}
+
+/* ── Row predicate & stats ──────────────────────────────────────────────────*/
+function rowPass(r) {
+  return activeEtats.has(r[I.ETAT])
+      && activeTypes.has(r[I.TYPE])
+      && r[I.RISK] >= minRisk
+      && (!activeCommune || r[I.COMMUNE] === activeCommune)
+      && (!activeDept    || r[I.DEPT]    === activeDept)
+      && (!activePeriode || r[I.PERIODE] === activePeriode);
+}
+
+function computeStats() {
+  let n = 0, maint = 0, remed = 0;
+  const ec = { 0:0, 1:0, 2:0, 3:0 };
+  for (const r of allRows) {
+    if (rowPass(r)) {
+      n++;
+      maint += r[I.MAINT];
+      remed += r[I.REMED];
+      if (r[I.ETAT] in ec) ec[r[I.ETAT]]++;
+    }
+  }
+  return { n, maint, remed, ec };
+}
+
+/* ── Build MapLibre filter expression ──────────────────────────────────────*/
+function buildFilter() {
+  const etats = [...activeEtats];
+  const types = [...activeTypes];
+  // Guard: empty set → hide everything
+  if (!etats.length || !types.length) return ['==', ['literal', true], false];
+  const f = ['all',
+    ['in', ['get', 'etat_int'],  ['literal', etats]],
+    ['in', ['get', 'type_int'],  ['literal', types]],
+    ['>=', ['get', 'risk_score'], minRisk],
+  ];
+  if (activeCommune) f.push(['==', ['get', 'commune'], activeCommune]);
+  if (activeDept)    f.push(['==', ['get', 'departement'], activeDept]);
+  if (activePeriode) f.push(['==', ['get', 'periode'], activePeriode]);
+  return f;
+}
+
+/* ── UI updates ─────────────────────────────────────────────────────────────*/
+function updateUI() {
+  if (map && map.getLayer('ouvrages')) map.setFilter('ouvrages', buildFilter());
+
+  const { n, maint, remed, ec } = computeStats();
+
+  document.getElementById('counter').textContent =
+    n.toLocaleString('fr-FR') + ' ouvrages affichés';
+  document.getElementById('s-count').textContent = n.toLocaleString('fr-FR');
+  document.getElementById('s-maint').textContent = (maint / 1e6).toFixed(1) + ' M€/an';
+  document.getElementById('s-remed').textContent = (remed / 1e6).toFixed(1) + ' M€';
+
+  // Legend
+  const lb = document.getElementById('legend-body');
+  lb.innerHTML = Object.entries(ETAT_LABEL).map(([k, lbl]) => `
+    <div class="legend-item">
+      <span class="legend-dot" style="background:${ETAT_COLOR[k]}"></span>
+      <span class="legend-name">${lbl}</span>
+      <span class="legend-n">${(ec[k] ?? 0).toLocaleString('fr-FR')}</span>
+    </div>`).join('');
+}
+
+/* ── Popup builder ──────────────────────────────────────────────────────────*/
+function fmtK(eur) {
+  if (eur == null) return '—';
+  return (eur / 1000).toFixed(1).replace('.', ',') + '\u202fk€';
+}
+
+function renderPopup(miniProps, details) {
+  const etat   = miniProps.etat_int;
+  const tInt   = miniProps.type_int;
+  const color  = ETAT_COLOR[etat]  ?? '#888';
+  const tLabel = TYPE_LABEL[tInt]  ?? 'Inconnu';
+  const eLabel = ETAT_LABEL[etat]  ?? '—';
+
+  const loading = (txt) =>
+    details ? txt : `<span class="popup-loading">${txt}</span>`;
+
+  const name    = details ? (details.nom_usuel    || 'Sans nom') : null;
+  const commune = details ? (details.commune      || '—')        : null;
+  const dept    = details ? (details.departement  || '—')        : null;
+  const periode = details ? (details.periode      || '—')        : null;
+
+  const remOpt  = details ? details.remediation_optimistic  : null;
+  const remPes  = details ? details.remediation_pessimistic : null;
+  const fourch  = details
+    ? `<span class="muted">${fmtK(remOpt)}\u2013${fmtK(remPes)}</span>`
+    : '<span class="popup-loading">fourchette…</span>';
+
+  let flagsHTML = '';
+  if (details) {
+    const flags = [];
+    if (details.tonnage_restriction === 'Oui' && details.tonnage_limit != null)
+      flags.push(`⚠️ Tonnage limité\u00a0: ${details.tonnage_limit}\u202ft`);
+    if (details.aquatic === 'Oui')
+      flags.push('💧 Exposition aquatique');
+    if (details.prior_repairs === 'Oui')
+      flags.push('🔨 Renforcements antérieurs');
+    if (flags.length) {
+      flagsHTML = `<div class="popup-flags">
+        ${flags.map(f => `<div class="popup-flag">${f}</div>`).join('')}
+      </div>`;
+    }
+  }
+
+  return `
+<div class="popup">
+  <div class="popup-header" style="border-left:4px solid ${color}">
+    <strong>${loading(name ?? 'Chargement…')}</strong>
+    <span class="type-badge">${tLabel}</span>
+  </div>
+  <div class="popup-meta">
+    <div>📍 ${loading(commune ? `${commune}\u202f·\u202f${dept}` : 'Chargement…')}</div>
+    <div>📅 ${loading(periode ?? 'Chargement…')}</div>
+  </div>
+  <div class="popup-body">
+    <div class="popup-section">
+      <span class="etat-badge" style="background:${color}">${eLabel}</span>
+      <span class="popup-surface">Surface\u00a0: ${(miniProps.surface ?? 0).toFixed(0)}\u202fm²</span>
+    </div>
+    <div class="popup-costs">
+      <div>💰 Maintenance\u00a0: <strong>${fmtK(miniProps.maint_min)}/an</strong>
+           <span class="muted">(minimal)</span></div>
+      <div>🔧 Remise à niveau\u00a0: <strong>${fmtK(miniProps.remediation)}</strong>
+           ${fourch}</div>
+    </div>
+    ${flagsHTML}
+  </div>
+</div>`;
+}
+
+/* ── Click handler ──────────────────────────────────────────────────────────*/
+async function handleClick(e) {
+  const feat  = e.features[0];
+  const mp    = feat.properties;    // mini props from MapLibre layer
+  const id    = mp.id;
+  openId      = id;
+
+  // Open popup immediately with mini data
+  if (!popup) popup = new maplibregl.Popup({ maxWidth: '320px', offset: 8 });
+  popup
+    .setLngLat(e.lngLat)
+    .setHTML(renderPopup(mp, null))
+    .addTo(map);
+
+  popup.once('close', () => { openId = null; });
+
+  try {
+    const details = await fetchDetails(id);
+    // Only update if same popup is still open
+    if (openId === id && popup.isOpen()) {
+      popup.setHTML(renderPopup(mp, details));
+    }
+  } catch (err) {
+    console.warn('fetchDetails failed:', err);
+  }
+}
+
+/* ── Wire controls ──────────────────────────────────────────────────────────*/
+function wireControls() {
+  document.querySelectorAll('input[data-group]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const isEtat = cb.dataset.group === 'etat';
+      const raw    = cb.dataset.val;
+
+      if (isEtat) {
+        const v = parseInt(raw, 10);
+        cb.checked ? activeEtats.add(v) : activeEtats.delete(v);
+
+      } else {
+        // val="34" → Buse(3) + Cadre(4) combined
+        const vals = raw === '34' ? [3, 4] : [parseInt(raw, 10)];
+        vals.forEach(v => cb.checked ? activeTypes.add(v) : activeTypes.delete(v));
+      }
+      updateUI();
+    });
+  });
+
+  document.getElementById('risk-slider').addEventListener('input', e => {
+    minRisk = parseInt(e.target.value, 10);
+    document.getElementById('risk-val').textContent = e.target.value;
+    updateUI();
+  });
+
+  // --- Département select ---
+  const deptSet = new Set(allRows.map(r => r[I.DEPT]).filter(Boolean));
+  const depts = [...deptSet].sort();
+  const deptSelect = document.getElementById('dept-select');
+  for (const d of depts) {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    deptSelect.appendChild(opt);
+  }
+  deptSelect.addEventListener('change', () => {
+    activeDept = deptSelect.value;
+    // Reset commune when département changes
+    activeCommune = '';
+    document.getElementById('commune-search').value = '';
+    rebuildCommuneList();
+    updateUI();
+  });
+
+  // --- Commune search ---
+  const allCommuneSet = new Set(allRows.map(r => r[I.COMMUNE]).filter(Boolean));
+  const communeInput = document.getElementById('commune-search');
+
+  function rebuildCommuneList() {
+    const datalist = document.getElementById('commune-list');
+    datalist.innerHTML = '';
+    const filtered = activeDept
+      ? new Set(allRows.filter(r => r[I.DEPT] === activeDept).map(r => r[I.COMMUNE]).filter(Boolean))
+      : allCommuneSet;
+    for (const c of [...filtered].sort()) {
+      const opt = document.createElement('option');
+      opt.value = c;
+      datalist.appendChild(opt);
+    }
+    return filtered;
+  }
+  const communeSet = rebuildCommuneList();
+
+  communeInput.addEventListener('input', () => {
+    const val = communeInput.value.trim();
+    const current = rebuildCommuneList();
+    activeCommune = current.has(val) ? val : (val === '' ? '' : activeCommune);
+    if (val === '') { activeCommune = ''; updateUI(); }
+  });
+  communeInput.addEventListener('change', () => {
+    const val = communeInput.value.trim();
+    const current = rebuildCommuneList();
+    activeCommune = current.has(val) ? val : '';
+    if (!current.has(val) && val !== '') communeInput.value = '';
+    updateUI();
+  });
+
+  // --- Période select ---
+  const periodeSet = new Set(allRows.map(r => r[I.PERIODE]).filter(Boolean));
+  const periodes = [...periodeSet].sort();
+  const periodeSelect = document.getElementById('periode-select');
+  for (const p of periodes) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    periodeSelect.appendChild(opt);
+  }
+  periodeSelect.addEventListener('change', () => {
+    activePeriode = periodeSelect.value;
+    updateUI();
+  });
+}
+
+/* ── Map bootstrap ──────────────────────────────────────────────────────────*/
+(async () => {
+  try {
+    progress(10, 'Téléchargement des données…');
+    const resp = await fetch('./map_data_mini.json');
+    if (!resp.ok) throw new Error('map_data_mini.json introuvable (HTTP ' + resp.status + ')');
+
+    progress(35, 'Décodage…');
+    const data = await resp.json();
+    allRows    = data.data;
+
+    progress(55, `${allRows.length.toLocaleString('fr-FR')} ouvrages chargés — initialisation de la carte…`);
+
+    // Build GeoJSON FeatureCollection from mini rows
+    const features = allRows.map(r => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [r[I.LON], r[I.LAT]] },
+      properties: {
+        id:         r[I.ID],
+        etat_int:   r[I.ETAT],
+        type_int:   r[I.TYPE],
+        surface:    r[I.SURF],
+        maint_min:  r[I.MAINT],
+        remediation:r[I.REMED],
+        risk_score: r[I.RISK],
+        commune:    r[I.COMMUNE],
+        departement:r[I.DEPT],
+        periode:    r[I.PERIODE],
+      },
+    }));
+
+    // Init map
+    map = new maplibregl.Map({
+      container: 'map',
+      style:     'https://tiles.openfreemap.org/styles/positron',
+      center:    [2.5, 46.5],
+      zoom:      5.5,
+      attributionControl: false,
+    });
+    map.addControl(new maplibregl.NavigationControl(), 'top-left');
+    map.addControl(
+      new maplibregl.AttributionControl({ compact: true }), 'bottom-right'
+    );
+
+    await new Promise(res => map.once('load', res));
+    progress(80, 'Ajout des 63 000 ouvrages…');
+
+    map.addSource('ouvrages-src', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features },
+    });
+
+    map.addLayer({
+      id:     'ouvrages',
+      type:   'circle',
+      source: 'ouvrages-src',
+      paint: {
+        'circle-color': ['match', ['get', 'etat_int'],
+          0, '#2ecc71', 1, '#f1c40f', 2, '#e67e22', 3, '#e74c3c', '#aaa'
+        ],
+        'circle-radius': ['interpolate', ['linear'], ['get', 'surface'],
+          0,   3,
+          30,  5,
+          100, 7,
+          500, 10,
+        ],
+        'circle-opacity':       0.75,
+        'circle-stroke-width':  0.8,
+        'circle-stroke-color':  '#ffffff',
+      },
+    });
+
+    map.on('click', 'ouvrages', handleClick);
+    map.on('mouseenter', 'ouvrages', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'ouvrages', () => { map.getCanvas().style.cursor = ''; });
+
+    wireControls();
+    updateUI();
+
+    progress(100, '');
+    hideLoader();
+
+  } catch (err) {
+    document.getElementById('loader-msg').textContent = '⚠️ ' + err.message;
+    document.getElementById('loader-fill').style.background = '#e74c3c';
+    console.error(err);
+  }
+})();
+</script>
+
+</body>
+</html>
+
+<!-- To run locally:
+     python3 -m http.server 8000
+     Then open http://localhost:8000
+-->
