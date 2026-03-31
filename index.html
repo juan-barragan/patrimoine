@@ -238,6 +238,45 @@ html, body {
 }
 .popup-flag { font-size: 12px; color: #c0392b; }
 .popup-loading { color: #aaa; font-style: italic; }
+
+/* ── Selection card ───────────────────────────────────────────────────────── */
+#selection-card {
+  margin-top: 11px;
+  border: 1px solid #d5e8f7;
+  border-radius: 8px;
+  background: #eaf4fb;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background .12s;
+}
+#selection-card:hover { background: #d8edf8; }
+
+#sc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px 5px;
+  background: #2980b9;
+  color: #fff;
+}
+#sc-title {
+  font-size: 12px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1;
+}
+#sc-close {
+  font-size: 13px; opacity: .7; flex-shrink: 0;
+  margin-left: 6px; line-height: 1;
+}
+#sc-close:hover { opacity: 1; }
+
+#sc-body { padding: 8px 10px 9px; }
+.sc-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 5px;
+}
+.sc-row:last-child { margin-bottom: 0; }
+.sc-lbl { font-size: 11.5px; color: #2c3e50; }
+.sc-val { font-size: 12.5px; font-weight: 700; color: #1a5276; font-variant-numeric: tabular-nums; }
+.sc-hint { font-size: 10px; color: #7f8c8d; text-align: right; margin-top: 5px; }
 </style>
 </head>
 <body>
@@ -340,6 +379,24 @@ html, body {
     </div>
 
     <div id="counter">–</div>
+
+    <div id="selection-card" style="display:none">
+      <div id="sc-header">
+        <span id="sc-title">–</span>
+        <span id="sc-close">✕</span>
+      </div>
+      <div id="sc-body">
+        <div class="sc-row">
+          <span class="sc-lbl">💰 Maintenance</span>
+          <span class="sc-val" id="sc-maint">–</span>
+        </div>
+        <div class="sc-row">
+          <span class="sc-lbl">🔧 Remise à niveau</span>
+          <span class="sc-val" id="sc-remed">–</span>
+        </div>
+        <div class="sc-hint">Cliquer pour effacer la sélection</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -393,6 +450,7 @@ let   minRisk     = 0;
 let   activeCommune = '';     // empty = all communes
 let   activeDept    = '';     // empty = all départements
 let   activePeriode = '';     // empty = all périodes
+let   rebuildCommuneList = () => {}; // assigned in wireControls
 
 
 /* ── Loading helpers ────────────────────────────────────────────────────────*/
@@ -459,6 +517,19 @@ function updateUI() {
   document.getElementById('s-count').textContent = n.toLocaleString('fr-FR');
   document.getElementById('s-maint').textContent = (maint / 1e6).toFixed(1) + ' M€/an';
   document.getElementById('s-remed').textContent = (remed / 1e6).toFixed(1) + ' M€';
+
+  // Selection card
+  const selCard = document.getElementById('selection-card');
+  const sel = activeCommune || activeDept;
+  if (sel) {
+    document.getElementById('sc-title').textContent =
+      activeCommune ? `Commune\u00a0: ${activeCommune}` : `Département\u00a0: ${activeDept}`;
+    document.getElementById('sc-maint').textContent = (maint / 1e6).toFixed(2) + '\u202fM€/an';
+    document.getElementById('sc-remed').textContent = (remed / 1e6).toFixed(2) + '\u202fM€';
+    selCard.style.display = '';
+  } else {
+    selCard.style.display = 'none';
+  }
 
   // Legend
   const lb = document.getElementById('legend-body');
@@ -589,7 +660,7 @@ function wireControls() {
   const allCommuneSet = new Set(allRows.map(r => r[I.COMMUNE]).filter(Boolean));
   const communeInput = document.getElementById('commune-search');
 
-  function rebuildCommuneList() {
+  rebuildCommuneList = function() {
     const datalist = document.getElementById('commune-list');
     datalist.innerHTML = '';
     const filtered = activeDept
@@ -630,6 +701,16 @@ function wireControls() {
   }
   periodeSelect.addEventListener('change', () => {
     activePeriode = periodeSelect.value;
+    updateUI();
+  });
+
+  // Dismiss selection card → clear dept + commune
+  document.getElementById('selection-card').addEventListener('click', () => {
+    activeDept    = '';
+    activeCommune = '';
+    document.getElementById('dept-select').value     = '';
+    document.getElementById('commune-search').value  = '';
+    rebuildCommuneList();
     updateUI();
   });
 }
